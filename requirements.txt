@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+prometheus-client
+transformers
+accelerate
+optimum
+torch
+requests
+shortuuid
+pydantic
+numpy
+loguru
