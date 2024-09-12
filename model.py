@@ -273,6 +273,9 @@ class ModelService:
                 generator = self._decode_generator_completion(streamer, model, stop_words)
             async for r in generator:
                 yield r
+                # https://github.com/fastapi/fastapi/issues/4146
+                # https://github.com/fastapi/fastapi/issues/5183
+                # https://github.com/fastapi/fastapi/discussions/10138
                 await asyncio.sleep(0)
         except asyncio.CancelledError:
             logger.info("catch cancel signal")
