@@ -2,53 +2,20 @@ import asyncio
 import json
 import time
 from threading import Thread
-
 import shortuuid
 import torch
 from loguru import logger
 from transformers import (
-    AutoTokenizer, AutoModelForCausalLM, StoppingCriteria, StoppingCriteriaList,
+    AutoTokenizer, AutoModelForCausalLM, StoppingCriteriaList,
     TextIteratorStreamer
 )
-
 from openai_api_protocol import (
     ChatCompletionStreamResponse, ChatCompletionResponseStreamChoice,
     DeltaMessage, CompletionStreamResponse, CompletionResponseStreamChoice
 )
-from stop import remove_suffix
+from stop import remove_suffix, CancelStopCriteria, DefaultStopWordsCriteria, LogitLineStopCriteria
 
 SSE_END = "data: [DONE]\n\n"
-
-class DefaultStopWordsCriteria(StoppingCriteria):
-    def __init__(self, stops=None, encounters=1):
-        super().__init__()
-        if stops is None:
-            stops = []
-        self.stops = stops
-        self.ENCOUNTERS = encounters
-
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
-        for stop in self.stops:
-            if torch.all((stop == input_ids[0][-len(stop):])).item():
-                return True
-
-        return False
-
-
-class CancelStopCriteria(StoppingCriteria):
-    def __init__(self):
-        super().__init__()
-        self.stop = False
-
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
-        # 判断请求是否cancel
-        if self.stop:
-            logger.info("cancel model generation")
-            return True
-        return False
-
-    def cancel(self):
-        self.stop = True
 
 
 class ModelService:
@@ -242,7 +209,8 @@ class ModelService:
         """
         inputs = self.tokenizer(prompt, return_tensors="pt")
         with torch.no_grad():
-            stopping_criteria = StoppingCriteriaList([cancel_stop_criteria])
+            logit_line_stop_criteria = LogitLineStopCriteria(logit_first=-1, logit_max=-0.00002, logit_min=-0.3, k=0.05, tokenizer=self.tokenizer)
+            stopping_criteria = StoppingCriteriaList([cancel_stop_criteria, logit_line_stop_criteria])
             # skip_prompt=True 可使最终输出中不包含输入的prompt部分
             streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True)
 

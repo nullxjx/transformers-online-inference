@@ -1,4 +1,7 @@
 import unittest
+from transformers import StoppingCriteria
+import torch
+from loguru import logger
 
 
 def find_shortest_prefix(suffix, chunk, stop_word):
@@ -138,3 +141,76 @@ class TestFindShortestPrefix(unittest.TestCase):
 
     def test_example_case_20(self):
         self.assertEqual(find_shortest_prefix("", "", ""), "")
+
+
+class DefaultStopWordsCriteria(StoppingCriteria):
+    def __init__(self, stops=None, encounters=1):
+        super().__init__()
+        if stops is None:
+            stops = []
+        self.stops = stops
+        self.ENCOUNTERS = encounters
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
+        for stop in self.stops:
+            if torch.all((stop == input_ids[0][-len(stop):])).item():
+                return True
+
+        return False
+
+
+class CancelStopCriteria(StoppingCriteria):
+    def __init__(self):
+        super().__init__()
+        self.stop = False
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
+        # 判断请求是否cancel
+        if self.stop:
+            logger.info("cancel model generation")
+            return True
+        return False
+
+    def cancel(self):
+        self.stop = True
+
+class LogitLineStopCriteria(StoppingCriteria):
+    def __init__(self, logit_first, logit_min, logit_max, k, tokenizer):
+        super().__init__()
+
+        self.logit_first = logit_first
+        self.logit_min = logit_min
+        self.logit_max = logit_max
+        self.k = k
+
+        self.scores = []
+        self.encouter_line = 0
+        self.tokenizer = tokenizer
+
+        self.str = ""
+
+        self.scores_line = []
+        self.str_line = [""]
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
+        self.str += self.tokenizer.decode(input_ids[0][-1])
+        self.str_line[-1] += self.tokenizer.decode(input_ids[0][-1])
+
+        self.scores.append(scores[-1][0][input_ids[0][-1]])
+
+        if self.encouter_line == 0:
+            if torch.mean(torch.tensor(self.scores)) < self.logit_first:
+                return True
+        else:
+            if torch.mean(torch.tensor(self.scores)) < min(self.logit_min + self.k * (self.encouter_line - 1),
+                                                           self.logit_max):
+                return True
+
+        if "\n" in self.tokenizer.decode(input_ids[0][-1]):
+            self.scores_line.append(torch.mean(torch.tensor(self.scores)))
+            self.str_line.append("")
+
+            self.encouter_line += 1
+            self.scores = []
+
+        return False
